@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
@@ -13,6 +13,7 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
+import warnings
 
 # 1. 讀取資料
 
@@ -38,10 +39,20 @@ def preprocess(df):
         df_processed['Machine_Failure'] = df['Machine failure']
         df_processed['Failure_type'] = df['Machine failure'].apply(lambda x: 'No Failure' if x == 0 else 'Failure')
     df_processed['Failure_type_labels'] = df_processed['Failure_type'].astype('category').cat.codes
+
+    # ——計算 Tool wear ——
+    df_processed['Tool wear'] = df_processed['Tool wear'].replace(0, 1e-6)
+
+    # ——計算 Power、PowerWear、TempPerPower ——
     df_processed['Power'] = df_processed['Rotational speed'] * df_processed['Torque']
     df_processed['Power'] = df_processed['Power'].replace(0, 1e-6)
     df_processed['PowerWear'] = df_processed['Power'] * df_processed['Tool wear']
     df_processed['TempPerPower'] = df_processed['Process temperature'] / df_processed['Power']
+
+    # ——對 Power、PowerWear 做 log1p 變換（壓縮量級）——
+    # df_processed['Power'] = np.log1p(df_processed['Power'])
+    # df_processed['PowerWear'] = np.log1p(df_processed['PowerWear'])
+
     df_processed = df_processed[['Air temperature', 'Rotational speed', 'Tool wear',
                                  'Torque', 'Process temperature', 'Power', 'PowerWear', 'TempPerPower',
                                  'Machine_Failure', 'Failure_type', 'Failure_type_labels']]
@@ -73,18 +84,18 @@ def get_models_and_params():
     # 1. 構建模型字典：僅對 KNN、SVM、MLP 加入標準化步驟
     models = {
         'KNN': Pipeline([
-            ('scaler', StandardScaler()),
+            ('scaler', RobustScaler()),
             ('clf', KNeighborsClassifier())
         ]),
         'SVM': Pipeline([
-            ('scaler', StandardScaler()),
+            ('scaler', RobustScaler()),
             ('clf', SVC(probability=False, random_state=42))
         ]),
         'DecisionTree': DecisionTreeClassifier(random_state=42),
         'RandomForest': RandomForestClassifier(random_state=42),
         'XGBoost': xgb.XGBClassifier(eval_metric='logloss', random_state=42),
         'MLP': Pipeline([
-            ('scaler', StandardScaler()),
+            ('scaler', RobustScaler()),
             ('clf', MLPClassifier(max_iter=300, random_state=42))
         ])
     }
@@ -114,7 +125,7 @@ def get_models_and_params():
         },
         'MLP': {
             'clf__hidden_layer_sizes': [(50,), (100,)],
-            'clf__alpha': [0.0001, 0.001]
+            'clf__alpha': [1e-4, 1e-3]
         }
     }
     return models, param_grids
@@ -123,6 +134,9 @@ def get_models_and_params():
 
 def evaluate(X_train, X_test, y_train, y_test, task='binary'):
     """模型訓練、超參數搜尋與評估 (含進度條)"""
+     # 隱藏所有 warning
+    warnings.filterwarnings('ignore')
+    np.seterr(all='ignore')
     models, param_grids = get_models_and_params()
     results = {}
     for name, base_model in tqdm(models.items(), desc="Tuning Models"):
@@ -130,14 +144,14 @@ def evaluate(X_train, X_test, y_train, y_test, task='binary'):
             estimator=base_model,
             param_grid=param_grids[name],
             scoring='f1_macro',
-            cv=7,
+            cv=5,
             n_jobs=-1,
-            verbose=1
+            verbose=0
         )
-        print(f"\n===== Tuning {name} =====")
+        # print(f"\n===== Tuning {name} =====")
         grid.fit(X_train, y_train)
         best_model = grid.best_estimator_
-        print(f">>> Best params for {name}: {grid.best_params_}\n")
+        # print(f">>> Best params for {name}: {grid.best_params_}\n")
         y_pred = best_model.predict(X_test)
         acc = accuracy_score(y_test, y_pred)
         prec = precision_score(y_test, y_pred, average='macro', zero_division=0)
