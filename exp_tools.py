@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import warnings
+import os
 
 # 1. 讀取資料
 
@@ -168,8 +169,8 @@ def evaluate(X_train, X_test, y_train, y_test, task='binary'):
 
 # 6. 視覺化
 
-def plot_f1_comparison(results_bin, results_multi):
-    """繪製二元與多類別 F1 分數比較圖"""
+def plot_f1_comparison(results_bin, results_multi, fname=None):
+    """繪製二元與多類別 F1 分數比較圖，標註 fname 並存到 /plot"""
     df_plot = pd.DataFrame({
         'Binary': results_bin['F1'],
         'Multi-class': results_multi['F1']
@@ -213,10 +214,13 @@ def plot_f1_comparison(results_bin, results_multi):
         )
     plt.xlabel('Model', fontsize=12)
     plt.ylabel('Macro F1 Score', fontsize=12)
-    plt.title('Comparison of Macro F1 Score: Binary vs Multi-class', fontsize=14)
+    plt.title(f'Comparison of Macro F1 Score: Binary vs Multi-class on {fname}', fontsize=14)
     plt.xticks(index, df_plot.index, fontsize=11)
     plt.ylim(0, 1.05)
     plt.legend(fontsize=11)
     plt.grid(axis='y', linestyle='--', alpha=0.5)
     plt.tight_layout()
+    if fname is not None:
+        os.makedirs('plot', exist_ok=True)
+        plt.savefig(f"plot/{fname}_f1_comparison.png", dpi=200)
     plt.show()
