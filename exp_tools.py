@@ -1,3 +1,20 @@
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+warnings.simplefilter("ignore", category=UserWarning)
+warnings.simplefilter("ignore", category=RuntimeWarning)
+warnings.simplefilter("ignore", category=FutureWarning)
+warnings.simplefilter("ignore", category=ConvergenceWarning)
+
+from contextlib import contextmanager
+@contextmanager
+def suppress_warnings():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        warnings.simplefilter("ignore", category=FutureWarning)
+        warnings.simplefilter("ignore", category=ConvergenceWarning)
+        yield
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -13,8 +30,36 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
-import warnings
 import os
+
+# === 自定義 Wrapper：隱藏所有 RuntimeWarning 與 ConvergenceWarning ===
+from sklearn.base import BaseEstimator, clone
+class WarningFreeEstimator(BaseEstimator):
+    def __init__(self, estimator):
+        self.estimator = estimator
+    def fit(self, X, y=None, **fit_params):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            warnings.simplefilter("ignore", category=FutureWarning)
+            warnings.simplefilter("ignore", category=ConvergenceWarning)
+            return self.estimator.fit(X, y, **fit_params)
+    def predict(self, X):
+        return self.estimator.predict(X)
+    def predict_proba(self, X):
+        if hasattr(self.estimator, "predict_proba"):
+            return self.estimator.predict_proba(X)
+        raise AttributeError("Underlying estimator does not support predict_proba.")
+    def score(self, X, y):
+        return self.estimator.score(X, y)
+    def get_params(self, deep=True):
+        return {"estimator": self.estimator}
+    def set_params(self, **params):
+        if "estimator" in params:
+            self.estimator = params["estimator"]
+        return self
+
+np.seterr(all='ignore')
 
 # 1. 讀取資料
 
@@ -136,35 +181,42 @@ def get_models_and_params():
 def evaluate(X_train, X_test, y_train, y_test, task='binary'):
     """模型訓練、超參數搜尋與評估 (含進度條)"""
      # 隱藏所有 warning
-    warnings.filterwarnings('ignore')
-    np.seterr(all='ignore')
+    import warnings
+    from sklearn.exceptions import ConvergenceWarning
+    warnings.simplefilter("ignore", category=UserWarning)
+    warnings.simplefilter("ignore", category=RuntimeWarning)
+    warnings.simplefilter("ignore", category=ConvergenceWarning)
+    warnings.simplefilter("ignore")
+
     models, param_grids = get_models_and_params()
     results = {}
-    for name, base_model in tqdm(models.items(), desc="Tuning Models"):
-        grid = GridSearchCV(
-            estimator=base_model,
-            param_grid=param_grids[name],
-            scoring='f1_macro',
-            cv=5,
-            n_jobs=-1,
-            verbose=0
-        )
-        # print(f"\n===== Tuning {name} =====")
-        grid.fit(X_train, y_train)
-        best_model = grid.best_estimator_
-        # print(f">>> Best params for {name}: {grid.best_params_}\n")
-        y_pred = best_model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        prec = precision_score(y_test, y_pred, average='macro', zero_division=0)
-        rec = recall_score(y_test, y_pred, average='macro')
-        f1 = f1_score(y_test, y_pred, average='macro')
-        results[name] = {
-            'Best_Params': grid.best_params_,
-            'Accuracy': acc,
-            'Precision': prec,
-            'Recall': rec,
-            'F1': f1
-        }
+    with suppress_warnings():
+        for name, base_model in tqdm(models.items(), desc="Tuning Models"):
+            base_model = WarningFreeEstimator(clone(base_model)) # 包起來 suppress warning
+            grid = GridSearchCV(
+                estimator=base_model,
+                param_grid=param_grids[name],
+                scoring='f1_macro',
+                cv=5,
+                n_jobs=-1,
+                verbose=0
+            )
+            # print(f"\n===== Tuning {name} =====")
+            grid.fit(X_train, y_train)
+            best_model = grid.best_estimator_.estimator  # 解包拿到原本的 estimator
+            # print(f">>> Best params for {name}: {grid.best_params_}\n")
+            y_pred = best_model.predict(X_test)
+            acc = accuracy_score(y_test, y_pred)
+            prec = precision_score(y_test, y_pred, average='macro', zero_division=0)
+            rec = recall_score(y_test, y_pred, average='macro')
+            f1 = f1_score(y_test, y_pred, average='macro')
+            results[name] = {
+                'Best_Params': grid.best_params_,
+                'Accuracy': acc,
+                'Precision': prec,
+                'Recall': rec,
+                'F1': f1
+            }
     return pd.DataFrame(results).T
 
 # 6. 視覺化
