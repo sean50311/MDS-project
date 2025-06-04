@@ -162,16 +162,18 @@ def get_models_and_params():
         },
         'RandomForest': {
             'n_estimators': [50, 100],
-            'max_depth': [None, 5]
+            'max_depth': [None, 5],
+            'min_samples_split': [2, 5]
         },
         'XGBoost': {
             'n_estimators': [50, 100],
             'max_depth': [3, 5],
-            'learning_rate': [0.1, 0.01]
+            'learning_rate': ['constant', 'adaptive']
         },
         'MLP': {
             'clf__hidden_layer_sizes': [(50,), (100,)],
-            'clf__alpha': [1e-4, 1e-3]
+            'clf__alpha': [1e-4, 1e-3],
+            'clf__learning_rate': ['constant', 'adaptive']
         }
     }
     return models, param_grids
