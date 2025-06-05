@@ -20,7 +20,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix, roc_curve, auc
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import os
+from sklearn.preprocessing import label_binarize
 
 # === 自定義 Wrapper：隱藏所有 RuntimeWarning 與 ConvergenceWarning ===
 from sklearn.base import BaseEstimator, clone
@@ -168,7 +169,7 @@ def get_models_and_params():
         'XGBoost': {
             'n_estimators': [50, 100],
             'max_depth': [3, 5],
-            'learning_rate': ['constant', 'adaptive']
+            'learning_rate': [0.01, 0.1]
         },
         'MLP': {
             'clf__hidden_layer_sizes': [(50,), (100,)],
@@ -192,6 +193,7 @@ def evaluate(X_train, X_test, y_train, y_test, task='binary'):
 
     models, param_grids = get_models_and_params()
     results = {}
+    raw_results = {}  # 新增：儲存所有模型的原始結果
     with suppress_warnings():
         for name, base_model in tqdm(models.items(), desc="Tuning Models"):
             base_model = WarningFreeEstimator(clone(base_model)) # 包起來 suppress warning
@@ -203,11 +205,10 @@ def evaluate(X_train, X_test, y_train, y_test, task='binary'):
                 n_jobs=-1,
                 verbose=0
             )
-            # print(f"\n===== Tuning {name} =====")
             grid.fit(X_train, y_train)
             best_model = grid.best_estimator_.estimator  # 解包拿到原本的 estimator
-            # print(f">>> Best params for {name}: {grid.best_params_}\n")
             y_pred = best_model.predict(X_test)
+
             acc = accuracy_score(y_test, y_pred)
             prec = precision_score(y_test, y_pred, average='macro', zero_division=0)
             rec = recall_score(y_test, y_pred, average='macro')
@@ -217,13 +218,13 @@ def evaluate(X_train, X_test, y_train, y_test, task='binary'):
                 'Accuracy': acc,
                 'Precision': prec,
                 'Recall': rec,
-                'F1': f1
+                'F1': f1,
             }
     return pd.DataFrame(results).T
 
 # 6. 視覺化
 
-def plot_f1_comparison(results_bin, results_multi, fname=None):
+def plot_f1_comparison(results_bin, results_multi, folder_name=None, fname=None):
     """繪製二元與多類別 F1 分數比較圖，標註 fname 並存到 /plot"""
     df_plot = pd.DataFrame({
         'Binary': results_bin['F1'],
@@ -276,5 +277,99 @@ def plot_f1_comparison(results_bin, results_multi, fname=None):
     plt.tight_layout()
     if fname is not None:
         os.makedirs('plot', exist_ok=True)
-        plt.savefig(f"plot/{fname}_f1_comparison.png", dpi=200)
+        plt.savefig(f"plot/{folder_name}/{fname}_f1_comparison.png", dpi=200)
     plt.show()
+
+    
+def specific_model_evaluation(model, param_grid, X_train, X_test, y_train, y_test, task='binary', cv=5):
+    """
+    直接指定模型、參數 grid、資料，自動完成 GridSearchCV、報告與繪圖
+    
+    Parameters:
+    -----------
+    model : estimator
+        sklearn 模型或 pipeline
+    param_grid : dict
+        GridSearchCV 的參數搜尋空間
+    X_train, y_train :
+        訓練資料
+    X_test, y_test :
+        測試資料
+    task : str, default='binary'
+        'binary' 或 'multi'
+    cv : int, default=5
+        交叉驗證折數
+    """
+    # GridSearchCV
+    grid = GridSearchCV(
+        estimator=model,
+        param_grid=param_grid,
+        scoring='f1_macro',
+        cv=cv,
+        n_jobs=-1,
+        verbose=0
+    )
+    grid.fit(X_train, y_train)
+    best_model = grid.best_estimator_
+    print(f"\nBest Params: {grid.best_params_}")
+
+    # 預測
+    y_pred = best_model.predict(X_test)
+
+    # Classification Report
+    print("\nClassification Report:")
+    print("=" * 50)
+    print(classification_report(y_test, y_pred))
+
+    # Confusion Matrix
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+    plt.title('Confusion Matrix')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.show()
+
+    # ROC Curve
+    plt.figure(figsize=(10, 8))
+    if task == 'binary':
+        if hasattr(best_model, 'predict_proba'):
+            y_score = best_model.predict_proba(X_test)[:, 1]
+        else:
+            y_score = best_model.decision_function(X_test)
+        fpr, tpr, _ = roc_curve(y_test, y_score)
+        roc_auc = auc(fpr, tpr)
+        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
+        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver Operating Characteristic (ROC) Curve')
+        plt.legend(loc="lower right")
+    else:
+        if not hasattr(best_model, 'predict_proba'):
+            print("Warning: Model does not support predict_proba. Cannot plot ROC curves.")
+            return
+        classes = np.unique(y_test)
+        n_classes = len(classes)
+        y_test_bin = label_binarize(y_test, classes=classes)
+        y_score = best_model.predict_proba(X_test)
+        fpr = dict()
+        tpr = dict()
+        roc_auc = dict()
+        for i in range(n_classes):
+            fpr[i], tpr[i], _ = roc_curve(y_test_bin[:, i], y_score[:, i])
+            roc_auc[i] = auc(fpr[i], tpr[i])
+            plt.plot(fpr[i], tpr[i], lw=2, label=f'ROC curve of class {i} (AUC = {roc_auc[i]:.2f})')
+        plt.plot([0, 1], [0, 1], 'k--', lw=2)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Multi-class ROC Curves')
+        plt.legend(loc="lower right")
+    plt.grid(True)
+    plt.show()
+    
+    
