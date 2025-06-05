@@ -85,7 +85,9 @@ def preprocess(df):
     else:
         df_processed['Machine_Failure'] = df['Machine failure']
         df_processed['Failure_type'] = df['Machine failure'].apply(lambda x: 'No Failure' if x == 0 else 'Failure')
-    df_processed['Failure_type_labels'] = df_processed['Failure_type'].astype('category').cat.codes
+    
+    category_order = ['No Failure','HDF', 'PWF', 'OSF', 'TWF',  'RNF']
+    df_processed['Failure_type_labels'] = df_processed['Failure_type'].astype('category').cat.reorder_categories(category_order).cat.codes
 
     # ——計算 Tool wear ——
     df_processed['Tool wear'] = df_processed['Tool wear'].replace(0, 1e-6)
@@ -371,5 +373,7 @@ def specific_model_evaluation(model, param_grid, X_train, X_test, y_train, y_tes
         plt.legend(loc="lower right")
     plt.grid(True)
     plt.show()
+
+    return best_model
     
     
