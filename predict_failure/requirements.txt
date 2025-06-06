@@ -1,0 +1,7 @@
+Flask
+xgboost
+numpy
+pandas
+scikit-learn
+tensorflow
+joblib

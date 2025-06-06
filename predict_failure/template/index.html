@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8" />
+    <title>Predict Failure</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        label { display: block; margin-top: 10px; }
+        input[type="text"] { width: 200px; padding: 5px; }
+        button { margin-top: 20px; padding: 8px 16px; }
+        .result { margin-top: 20px; font-weight: bold; }
+        .imputed { margin-top: 20px; background-color: #f9f9f9; padding: 10px; border-left: 4px solid #00bcd4; }
+    </style>
+</head>
+<body>
+    <h1>機械故障預測系統</h1>
+    <form method="POST">
+        {% for col in input_values.keys() %}
+        <label>{{ col }}:
+            <input type="text" name="{{ col }}" value="{{ input_values[col] }}" />
+        </label>
+        {% endfor %}
+        <button type="submit">送出預測</button>
+    </form>
+
+    {% if prediction_bin %}
+    <div class="result">{{ prediction_bin }}</div>
+    {% endif %}
+    
+    {% if prediction_multi %}
+    <div class="result">{{ prediction_multi }}</div>
+    {% endif %}
+
+    {% if imputed_values %}
+    <div class="imputed">
+        <h3>補值結果（缺失欄位已補）：</h3>
+        <ul>
+            {% for key, val in imputed_values.items() %}
+                <li>{{ key }}: {{ val | round(3) }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</body>
+</html>
