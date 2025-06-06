@@ -1,1 +1,15 @@
+# 新虛擬環境（搬到 predict_failure 裡面）
+predict_failure/venv/
+
+# 其他虛擬環境（備援）
 tf_env/
+venv/
+
+# Python 快取
+__pycache__/
+*.pyc
+
+# 模型相關
+model_assets/
+*.keras
+*.pkl
